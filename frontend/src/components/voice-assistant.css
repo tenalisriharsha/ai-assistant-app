@@ -1,0 +1,54 @@
+.va-wrap { display:flex; align-items:center; gap:14px; }
+.mic {
+  position: relative; width:72px; height:72px; border:none; border-radius:50%;
+  background: radial-gradient(120% 120% at 30% 30%, #845ef7 0%, #5b5bd6 40%, #3b3b8f 100%);
+  box-shadow: 0 10px 30px rgba(0,0,0,.25); cursor:pointer; outline:none;
+  transition: transform .15s ease, box-shadow .2s ease, filter .2s ease;
+}
+.mic:hover { transform: translateY(-1px) scale(1.02); box-shadow: 0 14px 34px rgba(0,0,0,.3); }
+.mic.disarmed { filter: grayscale(.2) brightness(.9); }
+.mic.armed.idle .ring { animation: breath 2.2s ease-in-out infinite; }
+.mic.awake .ring { animation: ping .7s ease-out 1; }
+.mic.listening .bars { opacity: 1; }
+.mic.speaking .ripples { opacity: .9; animation: ripple 1.6s linear infinite; }
+.mic.thinking .spinner { opacity: 1; animation: spin 1s linear infinite; }
+
+.mic .ring, .mic .dot, .mic .bars, .mic .spinner, .mic .ripples { position:absolute; inset:0; pointer-events:none; }
+.mic .ring::after {
+  content:""; position:absolute; inset: -6px; border-radius:50%;
+  border: 2px solid rgba(255,255,255,.45);
+}
+.mic .dot::after {
+  content:""; position:absolute; width:10px; height:10px; left:50%; top:50%; transform:translate(-50%, -50%);
+  background:#fff; border-radius:50%; filter: drop-shadow(0 0 6px rgba(255,255,255,.6));
+}
+.mic .bars { display:flex; align-items:center; justify-content:center; gap:4px; opacity:0; }
+.mic .bars span {
+  display:block; width:5px; height:16px; background:#fff; border-radius:4px; opacity:.85;
+  animation: vu 1s ease-in-out infinite;
+}
+.mic .bars span:nth-child(2){ animation-delay: .15s }
+.mic .bars span:nth-child(3){ animation-delay: .3s  }
+.mic .bars span:nth-child(4){ animation-delay: .45s }
+
+.mic .spinner {
+  width:100%; height:100%; border-radius:50%; box-sizing:border-box; border:3px solid transparent;
+  border-top-color: rgba(255,255,255,.9); border-right-color: rgba(255,255,255,.5); opacity:0;
+}
+.mic .ripples::before, .mic .ripples::after {
+  content:""; position:absolute; left:50%; top:50%; width:74px; height:74px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.4); transform: translate(-50%,-50%) scale(1); opacity:.8;
+}
+
+.status { line-height:1.2; }
+.status .sub { font-size:12px; opacity:.8; margin-top:2px; }
+.status .heard { margin-top:6px; font-size:12px; opacity:.75; }
+
+@keyframes breath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes ping { 0% { transform: scale(1); opacity:1 } 100% { transform: scale(1.2); opacity:.4 } }
+@keyframes vu { 0%,100% { height: 8px } 50% { height: 24px } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes ripple {
+  0% { transform: translate(-50%,-50%) scale(1); opacity:.8 }
+  100% { transform: translate(-50%,-50%) scale(1.35); opacity:0 }
+}

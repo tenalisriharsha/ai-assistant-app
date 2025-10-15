@@ -1,0 +1,16 @@
+<!-- public/robot.svg -->
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <rect x="14" y="18" width="36" height="28" rx="8" fill="white"/>
+  <circle cx="26" cy="30" r="4" fill="#7C3AED"/>
+  <circle cx="38" cy="30" r="4" fill="#7C3AED"/>
+  <rect x="24" y="38" width="16" height="3.5" rx="1.75" fill="#7C3AED"/>
+  <rect x="30.5" y="10" width="3" height="8" rx="1.5" fill="white" opacity="0.9"/>
+  <circle cx="32" cy="10" r="2.8" fill="white" opacity="0.95"/>
+</svg>
