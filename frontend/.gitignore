@@ -18,6 +18,9 @@
 .env.test.local
 .env.production.local
 
+# API secrets — do not commit
+electron/secrets.js
+
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

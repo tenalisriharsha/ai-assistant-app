@@ -1,7 +1,98 @@
+  // ---- conversational flow UI helpers ----
+  const renderCreateFlowMessage = (payload) => {
+    const msg = payload.message || "";
+
+    if (payload.status !== "need_more_info") {
+      return [{ from: "bot", text: msg }];
+    }
+
+    const awaiting = payload.awaiting;
+
+    // If backend provides structured buttons (Option B)
+    if (Array.isArray(payload.buttons) && payload.buttons.length > 0) {
+      return [
+        { from: "bot", text: msg || "Choose an option:" },
+        {
+          from: "bot",
+          type: "button_group",
+          buttons: payload.buttons
+        }
+      ];
+    }
+
+    if (awaiting === "date") {
+      return [
+        { from: "bot", text: "🗓️ When should I schedule it?" },
+        {
+          from: "bot",
+          type: "button_group",
+          buttons: [
+            { label: "Today", value: "today" },
+            { label: "Tomorrow", value: "tomorrow" },
+            { label: "Day After", value: "day after" }
+          ]
+        },
+        { from: "bot", text: "Or type a date like **dd/mm/yyyy**" }
+      ];
+    }
+
+    if (awaiting === "time") {
+      return [
+        { from: "bot", text: "⏰ What time should I schedule it?" },
+        {
+          from: "bot",
+          type: "button_group",
+          buttons: [
+            { label: "9:00 AM", value: "9:00 am" },
+            { label: "3:00 PM", value: "3:00 pm" },
+            { label: "5:30 PM", value: "5:30 pm" }
+          ]
+        },
+        { from: "bot", text: "Or type a time like **11am**, **12 pm**, or **11:23 am**" }
+      ];
+    }
+
+    if (awaiting === "duration") {
+      return [
+        { from: "bot", text: "⏱️ For how long?" },
+        {
+          from: "bot",
+          type: "button_group",
+          buttons: [
+            { label: "15 mins", value: "15 mins" },
+            { label: "30 mins", value: "30 mins" },
+            { label: "1 hour", value: "1 hour" }
+          ]
+        },
+        { from: "bot", text: "Or type a duration like **20 mins**, **45 minutes**, or **2 hours**" }
+      ];
+    }
+
+    return [
+      { from: "bot", text: msg }
+    ];
+  };
+
+  const handleButtonClick = async (value) => {
+    setMessages((m) => [...m, { from: 'user', text: value }]);
+
+    setLoading(true);
+    try {
+      const { data } = await api.post(
+        '/query',
+        { query: value },
+        { headers: { "Content-Type": "application/json" } }
+      );
+      applyPayload(data);
+    } finally {
+      setLoading(false);
+    }
+  };
 // src/App.js
 import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import api from './api';
 import MicButton from './components/MicButton';
+import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 
 function App() {
   const [query, setQuery] = useState('');
@@ -20,7 +111,75 @@ function App() {
   const [skippedConflicts, setSkippedConflicts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
+  // Track waiting field for conversational create flow
+  const [awaitingFlow, setAwaitingFlow] = useState(null);
   const scrollerRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onNewAppointment: () => {
+      setQuery('Create appointment ');
+      inputRef.current?.focus();
+    },
+    onFocusSearch: () => {
+      inputRef.current?.focus();
+    },
+    onExport: async () => {
+      if (window.electronAPI?.exportBackup) {
+        const result = await window.electronAPI.exportBackup();
+        if (result.success) pushToast({ title: 'Backup exported', subtitle: result.path });
+        else if (result.error) pushToast({ title: 'Export failed', subtitle: result.error });
+      }
+    },
+    onImport: async () => {
+      if (window.electronAPI?.importBackup) {
+        const result = await window.electronAPI.importBackup();
+        if (result.success) {
+          pushToast('Backup imported', `Created ${result.result.created} appointments`);
+          // Refresh today's view
+          sendShortcutQuery('today');
+        } else if (result.error) pushToast('Import failed', result.error);
+      }
+    },
+    onPrint: async () => {
+      if (window.electronAPI?.printToPDF) {
+        const result = await window.electronAPI.printToPDF();
+        if (result.success) pushToast({ title: 'PDF saved', subtitle: result.path });
+        else if (result.error) pushToast({ title: 'Print failed', subtitle: result.error });
+      }
+    },
+  });
+
+  // Menu event listeners (Electron)
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    const unsubNew = window.electronAPI.onMenuNewAppointment?.(() => {
+      setQuery('Create appointment ');
+      inputRef.current?.focus();
+    });
+    const unsubExport = window.electronAPI.onMenuExportBackup?.(() => {
+      window.electronAPI.exportBackup?.().then(r => {
+        if (r.success) pushToast({ title: 'Backup exported', subtitle: r.path });
+      });
+    });
+    const unsubImport = window.electronAPI.onMenuImportBackup?.(() => {
+      window.electronAPI.importBackup?.().then(r => {
+        if (r.success) pushToast({ title: 'Backup imported', subtitle: `Created ${r.result.created} appointments` });
+      });
+    });
+    const unsubPrint = window.electronAPI.onMenuPrintPDF?.(() => {
+      window.electronAPI.printToPDF?.().then(r => {
+        if (r.success) pushToast({ title: 'PDF saved', subtitle: r.path });
+      });
+    });
+    return () => {
+      unsubNew?.();
+      unsubExport?.();
+      unsubImport?.();
+      unsubPrint?.();
+    };
+  }, []);
 
   // ---- helpers --------------------------------------------------------------
 
@@ -29,7 +188,7 @@ function App() {
     if (scrollerRef.current) {
       scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
     }
-  }, [messages, appointments, freeSlots, conflicts, count, proposals, createdAppts, reminders]);
+  }, [messages.length]);
 
   const weekdayName = (isoDate) => {
     if (!isoDate) return '';
@@ -159,7 +318,7 @@ function App() {
 
   // helper already added earlier; include if missing
   async function markReminderDelivered(id) {
-    await fetch('http://127.0.0.1:5000/query', {
+    await api.post('/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'reminder_mark_delivered', id }),
@@ -214,6 +373,30 @@ function App() {
       setMessages((m) => [...m, { from: 'bot', text: 'Preview only — no changes applied.' }]);
       applyPayload(data.preview);
       return;
+    }
+
+    // Conversational CREATE-APPOINTMENT flow
+    if (data.flow === "create_appointment") {
+      const uiMsgs = renderCreateFlowMessage(data);
+      uiMsgs.forEach((msg) => setMessages((m) => [...m, msg]));
+
+      if (data.status === "need_more_info") {
+        setAwaitingFlow({
+          flow: "create_appointment",
+          awaiting: data.awaiting || null,
+          message: data.message || null
+        });
+        return;
+      }
+
+      if (data.status === "created") {
+        setAwaitingFlow(null);
+        if (data.appointment) {
+          setCreatedAppts((c) => [...c, data.appointment]);
+          setAppointments([data.appointment]);
+        }
+        return;
+      }
     }
 
     // Lists
@@ -325,16 +508,18 @@ function App() {
       });
     }
 
-    // Generic message
-    if (data.message && !data.created) {
-      setMessages((m) => [...m, { from: 'bot', text: String(data.message) }]);
+    // Generic message — BUT NOT for conversational create flow
+    if (data.flow !== "create_appointment") {
+      if (data.message && !data.created) {
+        setMessages((m) => [...m, { from: 'bot', text: String(data.message) }]);
+      }
     }
   };
   // ---- reminders polling (in-app notifications) ----------------------------
   useEffect(() => {
     const poll = async () => {
       try {
-        const { data } = await axios.post('http://127.0.0.1:5000/query', { action: 'reminders_due' }, {
+        const { data } = await api.post('/query', { action: 'reminders_due' }, {
           headers: { 'Content-Type': 'application/json' },
         });
         applyPayload(data);
@@ -342,10 +527,17 @@ function App() {
         // silent
       }
     };
-    // initial and interval
-    poll();
-    const id = setInterval(poll, 60000);
-    return () => clearInterval(id);
+    let id;
+    const start = () => { id = setInterval(poll, 60000); poll(); };
+    const stop = () => clearInterval(id);
+    start();
+    document.addEventListener('visibilitychange', () => {
+      document.hidden ? stop() : start();
+    });
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', () => {});
+    };
   }, []);
 
   // ---- voice transcript handler (uses same /query flow) ---------------------
@@ -358,7 +550,7 @@ function App() {
     setErrorText('');
 
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query', { query: trimmed }, {
+      const { data } = await api.post('/query', { query: trimmed }, {
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -392,6 +584,28 @@ function App() {
     const trimmed = query.trim();
     if (!trimmed) return;
 
+    // If we are in a conversational flow, bypass intent detection
+    if (awaitingFlow && awaitingFlow.flow === 'create_appointment') {
+      setMessages((m) => [...m, { from: 'user', text: trimmed }]);
+      setLoading(true);
+      setErrorText('');
+      try {
+        const { data } = await api.post(
+          '/query',
+          { query: trimmed },
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        applyPayload(data);
+      } catch (err) {
+        const msg = err.response?.data?.error || err.message || 'Something went wrong.';
+        setMessages((m) => [...m, { from: 'bot', text: `Oops — ${msg}` }]);
+      } finally {
+        setLoading(false);
+        setQuery('');
+      }
+      return;
+    }
+
     setMessages((m) => [...m, { from: 'user', text: trimmed }]);
     setLoading(true);
     setErrorText('');
@@ -413,7 +627,7 @@ function App() {
     }
 
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query', payload, {
+      const { data } = await api.post('/query', payload, {
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -445,6 +659,30 @@ function App() {
     }
   };
 
+  const sendShortcutQuery = async (action, extra = {}) => {
+    setLoading(true);
+    setErrorText('');
+    try {
+      const { data } = await api.post('/query', { action, ...extra }, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setAppointments([]);
+      setFreeSlots([]);
+      setConflicts([]);
+      setCount(null);
+      setProposals([]);
+      setSkippedConflicts([]);
+      setIsPreview(false);
+      setMessages((m) => [...m, { from: 'bot', text: 'Here are your results:' }]);
+      applyPayload(data);
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || 'Something went wrong.';
+      setErrorText(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ---- booking & moving -----------------------------------------------------
 
   // Book a proposed slot (action: create) — DRY to applyPayload
@@ -461,7 +699,7 @@ function App() {
     setLoading(true);
     setMessages((m) => [...m, { from: 'user', text: `Book: ${payload.title} on ${payload.date} ${payload.start_time}–${payload.end_time}` }]);
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query', payload, {
+      const { data } = await api.post('/query', payload, {
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -516,7 +754,7 @@ function App() {
     ]);
 
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query', payload, {
+      const { data } = await api.post('/query', payload, {
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -551,8 +789,8 @@ function App() {
     if (!newTitle) return;
     setLoading(true);
     try {
-      const res = await axios.post(
-        'http://127.0.0.1:5000/query',
+      const res = await api.post(
+        '/query',
         {
           action: 'update',
           selector: { id: a.id }, // use hard id; no fuzzy needed
@@ -602,7 +840,7 @@ function App() {
 
     setLoading(true);
     try {
-      const res = await axios.post('http://127.0.0.1:5000/query', payload, {
+      const res = await api.post('/query', payload, {
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -639,8 +877,8 @@ function App() {
     if (!window.confirm('Delete this appointment?')) return;
     setLoading(true);
     try {
-      const res = await axios.post(
-        'http://127.0.0.1:5000/query',
+      const res = await api.post(
+        '/query',
         {
           action: 'delete',
           selector: {
@@ -674,7 +912,7 @@ function App() {
   const snoozeReminder = async (r, minutes = 10) => {
     setLoading(true);
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query',
+      const { data } = await api.post('/query',
         { action: 'reminder_snooze', id: r.id, minutes },
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -691,7 +929,7 @@ function App() {
   const toggleReminder = async (r) => {
     setLoading(true);
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query',
+      const { data } = await api.post('/query',
         { action: 'reminder_toggle', id: r.id, active: !r.active },
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -708,7 +946,7 @@ function App() {
     if (!window.confirm('Delete this reminder?')) return;
     setLoading(true);
     try {
-      const { data } = await axios.post('http://127.0.0.1:5000/query',
+      const { data } = await api.post('/query',
         { action: 'reminder_delete', id: r.id },
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -731,8 +969,32 @@ function App() {
     }
   };
 
+  // ICS drag & drop
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.ics'));
+    if (files.length === 0) return;
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await api.post('/import_ics', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        pushToast({ title: 'ICS imported', subtitle: `Created ${res.data.created} events from ${file.name}` });
+        sendShortcutQuery('today');
+      } catch (err) {
+        pushToast({ title: 'ICS import failed', subtitle: err.response?.data?.error || err.message });
+      }
+    }
+  };
+
   return (
-    <div style={styles.shell}>
+    <div style={styles.shell} onDragOver={handleDragOver} onDrop={handleDrop}>
       <div style={styles.bgA} />
       <div style={styles.bgB} />
       <div style={styles.noise} />
@@ -771,6 +1033,32 @@ function App() {
               <div style={styles.subtitle}>Your intelligent scheduling assistant</div>
             </div>
           </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {window.electronAPI && (
+              <>
+                <button onClick={() => window.electronAPI.syncCalendar?.()} style={styles.headerBtn} title="Sync to Calendar.app">📅</button>
+                <button onClick={() => window.electronAPI.indexSpotlight?.()} style={styles.headerBtn} title="Index in Spotlight">🔍</button>
+              </>
+            )}
+            <button onClick={async () => {
+              if (window.electronAPI?.exportBackup) {
+                const r = await window.electronAPI.exportBackup();
+                if (r.success) pushToast({ title: 'Backup exported', subtitle: r.path });
+              }
+            }} style={styles.headerBtn} title="Export backup (Cmd+Shift+E)">💾</button>
+            <button onClick={async () => {
+              if (window.electronAPI?.importBackup) {
+                const r = await window.electronAPI.importBackup();
+                if (r.success) pushToast({ title: 'Backup imported', subtitle: `Created ${r.result.created} appointments` });
+              }
+            }} style={styles.headerBtn} title="Import backup (Cmd+Shift+I)">📂</button>
+            <button onClick={async () => {
+              if (window.electronAPI?.printToPDF) {
+                const r = await window.electronAPI.printToPDF();
+                if (r.success) pushToast({ title: 'PDF saved', subtitle: r.path });
+              }
+            }} style={styles.headerBtn} title="Print to PDF (Cmd+P)">🖨️</button>
+          </div>
         </header>
 
         <div style={styles.body}>
@@ -778,31 +1066,63 @@ function App() {
           <section style={styles.chatCard}>
             <div style={styles.chatHeader}>Chat</div>
             <div style={styles.chatScroll} ref={scrollerRef}>
-              {messages.map((m, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    marginBottom: 12,
-                    justifyContent: m.from === 'bot' ? 'flex-start' : 'flex-end',
-                  }}
-                >
+              {messages.map((m, i) => {
+                if (m.type === "button_group") {
+                  return (
+                    <div key={i} style={{ marginBottom: 12, display: "flex", gap: 8 }}>
+                      {m.buttons.map((btn, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleButtonClick(btn.value)}
+                          style={{
+                            padding: "8px 14px",
+                            borderRadius: 20,
+                            background: "#3b82f6",
+                            color: "white",
+                            border: "none",
+                            cursor: "pointer",
+                            fontWeight: 600
+                          }}
+                        >
+                          {btn.label}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                }
+
+                return (
                   <div
+                    key={i}
                     style={{
-                      ...styles.bubble,
-                      background: m.from === 'bot' ? 'white' : '#3b82f6',
-                      color: m.from === 'bot' ? '#111827' : 'white',
-                      border: m.from === 'bot' ? '1px solid #eef2ff' : 'none',
-                      boxShadow: m.from === 'bot' ? '0 1px 1px rgba(0,0,0,.02)' : '0 2px 10px rgba(59,130,246,.35)',
+                      display: 'flex',
+                      marginBottom: 12,
+                      justifyContent: m.from === 'bot' ? 'flex-start' : 'flex-end',
                     }}
                   >
-                    {m.text}
+                    <div
+                      style={{
+                        ...styles.bubble,
+                        background: m.from === 'bot' ? 'white' : '#3b82f6',
+                        color: m.from === 'bot' ? '#111827' : 'white',
+                        border: m.from === 'bot' ? '1px solid #eef2ff' : 'none',
+                        boxShadow: m.from === 'bot' ? '0 1px 1px rgba(0,0,0,.02)' : '0 2px 10px rgba(59,130,246,.35)',
+                      }}
+                    >
+                      {m.text}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {loading && <div style={styles.loading}>Thinking…</div>}
             </div>
 
+            {awaitingFlow && awaitingFlow.flow === 'create_appointment' && (
+              <div style={{ padding: '8px 16px', fontSize: 13, color: '#6b7280' }}>
+                ⚙️ <b>Scheduler AI needs:</b> {awaitingFlow.awaiting ? awaitingFlow.awaiting : 'more details'}<br />
+                <i>{awaitingFlow.message}</i>
+              </div>
+            )}
             <div style={styles.inputRow}>
               <input
                 type="text"
@@ -1138,6 +1458,7 @@ const styles = {
   bigNumber: { fontSize: 32, fontWeight: 800, color: '#111827' },
   actionRow: { marginTop: 8, display: 'flex', gap: 8 },
   smallBtn: { padding: '8px 12px', borderRadius: 8, border: 'none', background: '#3b82f6', color: 'white', cursor: 'pointer', fontWeight: 600 },
+  headerBtn: { padding: '6px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', fontSize: 14, lineHeight: 1 },
   toastStack: { position: 'fixed', top: 16, right: 16, display: 'grid', gap: 8, zIndex: 1000 },
   toast: { background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, boxShadow: '0 8px 20px rgba(0,0,0,.08)', minWidth: 260, maxWidth: 360 },
   toastBtn: { padding: '6px 10px', borderRadius: 8, border: 'none', background: '#111827', color: 'white', cursor: 'pointer', fontWeight: 600 },

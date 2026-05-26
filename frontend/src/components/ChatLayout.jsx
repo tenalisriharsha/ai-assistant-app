@@ -1,6 +1,6 @@
 // src/components/ChatLayout.jsx
 import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { PaperAirplaneIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 export default function ChatLayout() {
@@ -38,7 +38,7 @@ export default function ChatLayout() {
     else payload = { query: trimmed };
 
     try {
-      const res = await axios.post('http://127.0.0.1:5000/query', payload, {
+      const res = await api.post('/query', payload, {
         headers: { 'Content-Type': 'application/json' }
       });
 
@@ -80,7 +80,27 @@ export default function ChatLayout() {
           <ClockIcon className="h-6 w-6 text-purple-600" />
           <h1 className="text-xl font-semibold text-gray-800">Scheduler AI</h1>
         </div>
-        <p className="text-sm text-gray-600">Your intelligent scheduling assistant</p>
+        <div className="flex items-center space-x-3">
+          {window.electronAPI && (
+            <>
+              <button
+                onClick={() => window.electronAPI.syncCalendar?.()}
+                className="text-xs px-2 py-1 rounded-md bg-purple-100 text-purple-700 hover:bg-purple-200 transition"
+                title="Sync to Calendar.app"
+              >
+                📅 Sync Calendar
+              </button>
+              <button
+                onClick={() => window.electronAPI.indexSpotlight?.()}
+                className="text-xs px-2 py-1 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200 transition"
+                title="Index in Spotlight"
+              >
+                🔍 Spotlight
+              </button>
+            </>
+          )}
+          <p className="text-sm text-gray-600">Your intelligent scheduling assistant</p>
+        </div>
       </header>
 
       {/* Body */}

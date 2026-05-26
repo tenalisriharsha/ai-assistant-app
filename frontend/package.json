@@ -1,8 +1,11 @@
 {
-  "name": "frontend",
+  "name": "scheduler-ai",
+  "productName": "Scheduler AI",
+  "description": "Natural-language calendar assistant",
+  "author": "Your Name",
   "version": "0.1.0",
   "private": true,
-  "main": "electron/main.js",
+  "main": "build/electron.js",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
@@ -10,7 +13,57 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "electron:dev": "concurrently -k \"PORT=3001 BROWSER=none npm start\" \"wait-on tcp:3001 && electron .\"",
-    "electron:build": "npm run build:web && electron-builder --mac"
+    "prebuild:backend": "node scripts/prebuild-backend.js",
+    "prebuild:native": "node scripts/build-native.js",
+    "prebuild:electron": "cp electron/main.js build/electron.js",
+    "electron:build": "npm run prebuild:backend && npm run prebuild:native && npm run build:web && npm run prebuild:electron && electron-builder --mac && npm run postbuild:sign",
+    "postbuild:sign": "node scripts/sign-macos.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.yourco.schedulerai",
+    "productName": "Scheduler AI",
+    "directories": {
+      "buildResources": "electron"
+    },
+    "mac": {
+      "icon": "electron/assets/icon.png",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "dir",
+          "arch": ["universal"]
+        }
+      ]
+    },
+    "files": [
+      "electron/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "electron/assets/native",
+        "to": "native",
+        "filter": ["**/*"]
+      }
+    ]
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
@@ -25,35 +78,10 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.7.1",
-    "react-scripts": "5.0.1",
+    "react-scripts": "^5.0.1",
     "web-vitals": "^2.1.4"
   },
-  "devDependencies": {
-    "concurrently": "^9.2.1",
-    "electron": "^31.7.7",
-    "electron-builder": "^24.13.3",
-    "wait-on": "^8.0.4"
-  },
-  "build": {
-    "appId": "com.yourco.schedulerai",
-    "mac": {
-      "category": "public.app-category.productivity"
-    },
-    "files": [
-      "electron/**/*",
-      "build/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "electron/assets",
-        "to": "assets",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ]
-  },
+  "proxy": "http://127.0.0.1:5001",
   "browserslist": {
     "production": [
       ">0.2%",

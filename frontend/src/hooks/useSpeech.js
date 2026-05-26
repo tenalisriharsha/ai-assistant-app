@@ -1,50 +1,56 @@
-// hooks/useSpeech.js
-// Minimal, battle-tested SpeechRecognition wrapper with graceful fallbacks.
+import { useRef, useCallback, useEffect } from 'react';
 
 export function isSpeechRecognitionSupported() {
-  // Chrome/Edge: SpeechRecognition; Safari: webkitSpeechRecognition (spotty)
   return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
 
-export default function useSpeech({ lang = 'en-US', grammar = [] , interim = true, onFinal } = {}) {
-  let recognition = null;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const SGL = window.SpeechGrammarList || window.webkitSpeechGrammarList;
-
-  const state = {
+export default function useSpeech({ lang = 'en-US', grammar = [], interim = true, onFinal } = {}) {
+  const recognitionRef = useRef(null);
+  const stateRef = useRef({
     listening: false,
     interimText: '',
     finalText: '',
-    _onend: null,
-  };
+  });
+  const callbacksRef = useRef({ onFinal });
+  callbacksRef.current.onFinal = onFinal;
 
-  function buildGrammar() {
+  const buildGrammar = useCallback(() => {
+    const SGL = window.SpeechGrammarList || window.webkitSpeechGrammarList;
     if (!SGL || !grammar?.length) return null;
     const gl = new SGL();
-    // Simple JSGF from phrases (optional but helps recognition stability for our domain)
     const jsgf = `#JSGF V1.0; grammar sched; public <cmd> = ${grammar.map(p => p.replace(/\s+/g,' ')).join(' | ')} ;`;
     try {
       gl.addFromString(jsgf, 1);
       return gl;
     } catch { return null; }
-  }
+  }, [grammar]);
 
-  function start() {
+  const stop = useCallback(() => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
+  }, []);
+
+  const start = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) throw new Error('SpeechRecognition not supported in this browser.');
-    if (state.listening) return;
+    if (stateRef.current.listening) return;
 
-    recognition = new SR();
+    // Abort any previous instance
+    try { recognitionRef.current?.abort(); } catch {}
+
+    const recognition = new SR();
     recognition.lang = lang;
-    recognition.continuous = false;            // push-to-talk UX
-    recognition.interimResults = !!interim;    // show partial text
+    recognition.continuous = false;
+    recognition.interimResults = !!interim;
     recognition.maxAlternatives = 1;
 
     const gl = buildGrammar();
     if (gl) recognition.grammars = gl;
 
-    state.listening = true;
-    state.interimText = '';
-    state.finalText = '';
+    stateRef.current.listening = true;
+    stateRef.current.interimText = '';
+    stateRef.current.finalText = '';
 
     recognition.onresult = (e) => {
       let text = '';
@@ -52,34 +58,38 @@ export default function useSpeech({ lang = 'en-US', grammar = [] , interim = tru
         const res = e.results[i];
         if (res.isFinal) {
           text += res[0].transcript;
-          state.finalText = (state.finalText + ' ' + text).trim();
+          stateRef.current.finalText = (stateRef.current.finalText + ' ' + text).trim();
         } else {
-          state.interimText = res[0].transcript;
+          stateRef.current.interimText = res[0].transcript;
         }
       }
     };
 
-    recognition.onerror = (_e) => {
-      // swallow common benign errors (no-speech, aborted)
-    };
+    recognition.onerror = () => {};
 
     recognition.onend = () => {
-      state.listening = false;
-      const text = (state.finalText || state.interimText || '').trim();
-      if (text && typeof onFinal === 'function') onFinal(text);
+      stateRef.current.listening = false;
+      const text = (stateRef.current.finalText || stateRef.current.interimText || '').trim();
+      if (text && typeof callbacksRef.current.onFinal === 'function') {
+        callbacksRef.current.onFinal(text);
+      }
     };
 
+    recognitionRef.current = recognition;
     recognition.start();
-  }
+  }, [lang, interim, buildGrammar]);
 
-  function stop() {
-    try { recognition?.stop(); } catch {}
-  }
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.abort(); } catch {}
+    };
+  }, []);
 
   return {
-    get listening() { return state.listening; },
-    get interimText() { return state.interimText; },
-    get finalText() { return state.finalText; },
-    start, stop,
+    get listening() { return stateRef.current.listening; },
+    get interimText() { return stateRef.current.interimText; },
+    get finalText() { return stateRef.current.finalText; },
+    start,
+    stop,
   };
 }

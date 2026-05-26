@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+
+# Database / local data
+*.db
+*.db-shm
+*.db-wal
+appointments*.sqlite
+*.bak.sqlite
+
+# Secrets
+frontend/electron/secrets.js
+
+# Node
+node_modules/
+/build
+npm-debug.log*
+
+# IDE / OS
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Legacy backups
+*_legacy.py
+
+# Swift
+.build/
+*.xcodeproj
+*.xcworkspace
+
+# Electron distribution / build outputs
+dist/
+*.dmg

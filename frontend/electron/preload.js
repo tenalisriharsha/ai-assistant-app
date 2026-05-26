@@ -37,6 +37,49 @@ const api = {
     ipcRenderer.on('navigate', handler);
     return () => ipcRenderer.removeListener('navigate', handler);
   },
+
+  // Native macOS integrations
+  syncCalendar: () => ipcRenderer.send('sync:calendar'),
+  indexSpotlight: () => ipcRenderer.send('index:spotlight'),
+  onNativeSyncResult(cb) {
+    const handler = (_e, result) => cb?.(result);
+    ipcRenderer.on('native:sync-result', handler);
+    return () => ipcRenderer.removeListener('native:sync-result', handler);
+  },
+
+  // Print to PDF
+  printToPDF: () => ipcRenderer.invoke('print:to-pdf'),
+  onPrintResult(cb) {
+    const handler = (_e, result) => cb?.(result);
+    ipcRenderer.on('print:result', handler);
+    return () => ipcRenderer.removeListener('print:result', handler);
+  },
+
+  // Backup / restore
+  exportBackup: () => ipcRenderer.invoke('backup:export'),
+  importBackup: () => ipcRenderer.invoke('backup:import'),
+
+  // Menu events
+  onMenuNewAppointment(cb) {
+    const handler = () => cb?.();
+    ipcRenderer.on('menu:new-appointment', handler);
+    return () => ipcRenderer.removeListener('menu:new-appointment', handler);
+  },
+  onMenuExportBackup(cb) {
+    const handler = () => cb?.();
+    ipcRenderer.on('menu:export-backup', handler);
+    return () => ipcRenderer.removeListener('menu:export-backup', handler);
+  },
+  onMenuImportBackup(cb) {
+    const handler = () => cb?.();
+    ipcRenderer.on('menu:import-backup', handler);
+    return () => ipcRenderer.removeListener('menu:import-backup', handler);
+  },
+  onMenuPrintPDF(cb) {
+    const handler = () => cb?.();
+    ipcRenderer.on('menu:print-pdf', handler);
+    return () => ipcRenderer.removeListener('menu:print-pdf', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
