@@ -2,6 +2,7 @@
 
 from datetime import date as _date, time as _time, timedelta, datetime as _dt
 from calendar import monthrange
+from types import SimpleNamespace
 from typing import List, Optional, Tuple, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func, and_
@@ -254,11 +255,24 @@ def bulk_create_appointments(
     to_create: List[Appointment] = []
     # Pre-check conflicts if not allowing overlap
     if not allow_overlap:
+        # Track conflicts against both existing DB rows and entries already
+        # validated earlier in this same batch. A plain per-entry DB query
+        # (find_conflicts_for_slot) can't see those, since the session has
+        # autoflush=False and nothing here is committed until the end.
+        affected_dates = {e["date"] for e in entries}
+        day_appts_map = {
+            d: list(get_appointments_by_date(db, d))
+            for d in affected_dates
+        }
         for e in entries:
             d, s, e_t, desc = e["date"], e["start_time"], e["end_time"], e.get("description", "")
-            conflicts = find_conflicts_for_slot(db, d, s, e_t)
+            conflicts = [
+                a for a in day_appts_map.get(d, [])
+                if _overlaps(s, e_t, a.start_time, a.end_time)
+            ]
             if conflicts:
                 raise ValueError(f"Conflict when creating '{desc}' on {d} {s}-{e_t}")
+            day_appts_map.setdefault(d, []).append(SimpleNamespace(start_time=s, end_time=e_t))
 
     # Create
     for e in entries:
@@ -1099,7 +1113,9 @@ def snooze_reminder(db: Session, reminder_id: int, minutes: int = 10) -> Optiona
     return r
 
 def get_due_reminders(db: Session, now: Optional[_dt] = None) -> List[Reminder]:
-    now = now or _dt.utcnow()
+    # Reminder.date/Reminder.time are stored as naive local wall-clock values
+    # (same convention as Appointment), so "now" must be local, not UTC.
+    now = now or _dt.now()
     # due if (date,time) <= now and active and not delivered
     return db.query(Reminder).options(joinedload(Reminder.appointment)).filter(
         and_(

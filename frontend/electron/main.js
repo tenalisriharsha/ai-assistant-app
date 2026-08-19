@@ -24,9 +24,15 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:5001';
 // ---------------------------------------------------------------------------
 let bundledSecrets = {};
 try {
-  bundledSecrets = require('./secrets');
+  // This file is copied to build/electron.js at build time (see
+  // prebuild:electron), so a plain relative require would look for
+  // build/secrets.js instead of the real electron/secrets.js. Resolve
+  // explicitly against the source location instead.
+  bundledSecrets = require(path.join(__dirname, '..', 'electron', 'secrets'));
 } catch (_) {
-  // secrets.js is optional (gitignored)
+  // secrets.js is optional (gitignored), and deliberately excluded from
+  // packaged builds (see package.json build.files) so it never ships in
+  // a distributed app — only process.env or a user secrets.json apply there.
 }
 
 // Allow users to override keys at runtime by dropping a secrets.json into
@@ -395,6 +401,19 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+
+  // Defense-in-depth: this app never needs to navigate away from its own
+  // UI or open new windows, so block both outright instead of trusting
+  // every current/future bit of renderer code not to trigger one.
+  const allowedNavigationOrigin = isDev
+    ? `http://localhost:${DEV_PORT}`
+    : `file://${path.join(__dirname, '..', 'build', 'index.html')}`;
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(allowedNavigationOrigin)) {
+      event.preventDefault();
+    }
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   if (isDev) {
     win.loadURL(`http://localhost:${DEV_PORT}`);

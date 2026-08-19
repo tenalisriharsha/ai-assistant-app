@@ -1,4 +1,4 @@
-from datetime import date as _date, time as _time, datetime as _dt, timezone as _tz
+from datetime import date as _date, time as _time, datetime as _dt
 from typing import Any, Dict, Optional
 
 from crud import (
@@ -92,7 +92,7 @@ def handle_reminder_action(db, action: str, data: Dict[str, Any]) -> tuple:
         return ({'error': 'Not found'}, 404)
 
     if action in {'reminders_due'}:
-        due = get_due_reminders(db, now=_dt.now(_tz.utc))
+        due = get_due_reminders(db, now=_dt.now())
         return ({'due_reminders': [_serialize_reminder(r, db) for r in due]}, 200)
 
     if action in {'reminder_mark_delivered'}:

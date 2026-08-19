@@ -1,6 +1,7 @@
 # models.py
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import List, Set
 
@@ -23,7 +24,12 @@ from sqlalchemy import event
 
 # Use an absolute path so every module (and subfolder scripts) hit the same DB.
 BASE_DIR = Path(__file__).resolve().parent
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{(BASE_DIR / 'appointments.db').as_posix()}"
+# Overridable so tests can point at an isolated throwaway database instead of
+# the real appointments.db.
+SQLALCHEMY_DATABASE_URL = os.getenv(
+    "SCHEDULER_DB_URL",
+    f"sqlite:///{(BASE_DIR / 'appointments.db').as_posix()}",
+)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

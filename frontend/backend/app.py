@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import re
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import date as _date, time as _time, timedelta, datetime as _dt, timezone as _tz
+from datetime import date as _date, time as _time, timedelta, datetime as _dt
 from functools import wraps
 
 from utils import (
@@ -62,10 +62,32 @@ from schemas import Appointment as AppointmentSchema
 from pydantic import ValidationError
 
 app = Flask(__name__)
-CORS(app)
+
+# This server listens on 127.0.0.1 and is reachable by ANY page the user has
+# open in their regular browser, not just this app's own frontend. Since
+# /query uses a JSON content-type (a CORS "non-simple" request), restricting
+# allowed origins here is what makes the browser actually block a random
+# website's fetch() from reading/mutating the user's calendar data.
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",   # CRA dev server
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",   # CRA dev server under `npm run electron:dev`
+    "http://127.0.0.1:3001",
+    "null",                    # packaged Electron app loads via file://, sent as Origin: null
+]
+CORS(app, origins=ALLOWED_ORIGINS)
 
 # Global in-memory session states to support multi-step creation
 CREATE_APPT_SESSIONS: Dict[str, dict] = {}
+CREATE_APPT_SESSION_TOUCHED: Dict[str, float] = {}
+CREATE_APPT_SESSION_TTL_SECONDS = 15 * 60  # abandoned flows expire after 15 min idle
+
+def _prune_stale_create_sessions() -> None:
+    cutoff = _dt.now().timestamp() - CREATE_APPT_SESSION_TTL_SECONDS
+    stale = [k for k, ts in CREATE_APPT_SESSION_TOUCHED.items() if ts < cutoff]
+    for k in stale:
+        CREATE_APPT_SESSIONS.pop(k, None)
+        CREATE_APPT_SESSION_TOUCHED.pop(k, None)
 
 # ---------- decorators ----------
 def with_db(f):
@@ -82,12 +104,10 @@ def health():
 
 # Tiny root route for manual pings
 @app.get('/')
-@app.get('/')
 def root():
     return jsonify({'status': 'running'})
 
 # JSON/error handler for bad JSON bodies
-@app.errorhandler(400)
 @app.errorhandler(400)
 def handle_400(err):
     try:
@@ -863,7 +883,7 @@ def query_appointments(db):
 
         if action in {'reminders_due'}:
             # UI can poll this every ~60s to show in-app toasts
-            due = get_due_reminders(db, now=_dt.now(_tz.utc))
+            due = get_due_reminders(db, now=_dt.now())
             payload = [_serialize_reminder(r, db) for r in due]
             return jsonify({'due_reminders': payload})
 
@@ -982,7 +1002,12 @@ def query_appointments(db):
         # ---------------------------------------------------------
         # 0. Conversational CREATE-APPOINTMENT FLOW (early intercept)
         # ---------------------------------------------------------
-        session_key = request.remote_addr or "default"
+        # Prefer a per-tab/client id the frontend sends explicitly, so two
+        # users (or two tabs) behind the same IP don't share/clobber each
+        # other's in-progress flow. Falls back to IP for older callers.
+        session_key = request.headers.get("X-Session-Id") or request.remote_addr or "default"
+        _prune_stale_create_sessions()
+        CREATE_APPT_SESSION_TOUCHED[session_key] = _dt.now().timestamp()
 
         create_result = handle_create_appointment_flow(
             db=db,
@@ -996,6 +1021,8 @@ def query_appointments(db):
                 "status": create_result.get("status"),
                 "message": create_result.get("message"),
                 "appointment": create_result.get("appointment"),
+                "awaiting": create_result.get("awaiting"),
+                "buttons": create_result.get("buttons"),
                 "flow": "create_appointment"
             }), 200
     except Exception:

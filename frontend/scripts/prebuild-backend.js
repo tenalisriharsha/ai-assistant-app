@@ -18,8 +18,6 @@ const rootFiles = [
   'database.py',
   'schemas.py',
   'openai_handler.py',
-  'nl_creation_flow.py',
-  'excel_handler.py',
   'generate_sample_excel.py',
   'inspect_db.py',
 ];
@@ -30,7 +28,6 @@ const packages = [
   'intents',
   'flows',
   'scheduler',
-  'handlers',
   'scripts',
 ];
 

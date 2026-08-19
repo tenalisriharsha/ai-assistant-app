@@ -1,98 +1,125 @@
-  // ---- conversational flow UI helpers ----
-  const renderCreateFlowMessage = (payload) => {
-    const msg = payload.message || "";
-
-    if (payload.status !== "need_more_info") {
-      return [{ from: "bot", text: msg }];
-    }
-
-    const awaiting = payload.awaiting;
-
-    // If backend provides structured buttons (Option B)
-    if (Array.isArray(payload.buttons) && payload.buttons.length > 0) {
-      return [
-        { from: "bot", text: msg || "Choose an option:" },
-        {
-          from: "bot",
-          type: "button_group",
-          buttons: payload.buttons
-        }
-      ];
-    }
-
-    if (awaiting === "date") {
-      return [
-        { from: "bot", text: "🗓️ When should I schedule it?" },
-        {
-          from: "bot",
-          type: "button_group",
-          buttons: [
-            { label: "Today", value: "today" },
-            { label: "Tomorrow", value: "tomorrow" },
-            { label: "Day After", value: "day after" }
-          ]
-        },
-        { from: "bot", text: "Or type a date like **dd/mm/yyyy**" }
-      ];
-    }
-
-    if (awaiting === "time") {
-      return [
-        { from: "bot", text: "⏰ What time should I schedule it?" },
-        {
-          from: "bot",
-          type: "button_group",
-          buttons: [
-            { label: "9:00 AM", value: "9:00 am" },
-            { label: "3:00 PM", value: "3:00 pm" },
-            { label: "5:30 PM", value: "5:30 pm" }
-          ]
-        },
-        { from: "bot", text: "Or type a time like **11am**, **12 pm**, or **11:23 am**" }
-      ];
-    }
-
-    if (awaiting === "duration") {
-      return [
-        { from: "bot", text: "⏱️ For how long?" },
-        {
-          from: "bot",
-          type: "button_group",
-          buttons: [
-            { label: "15 mins", value: "15 mins" },
-            { label: "30 mins", value: "30 mins" },
-            { label: "1 hour", value: "1 hour" }
-          ]
-        },
-        { from: "bot", text: "Or type a duration like **20 mins**, **45 minutes**, or **2 hours**" }
-      ];
-    }
-
-    return [
-      { from: "bot", text: msg }
-    ];
-  };
-
-  const handleButtonClick = async (value) => {
-    setMessages((m) => [...m, { from: 'user', text: value }]);
-
-    setLoading(true);
-    try {
-      const { data } = await api.post(
-        '/query',
-        { query: value },
-        { headers: { "Content-Type": "application/json" } }
-      );
-      applyPayload(data);
-    } finally {
-      setLoading(false);
-    }
-  };
 // src/App.js
 import React, { useState, useRef, useEffect } from 'react';
 import api from './api';
 import MicButton from './components/MicButton';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
+
+// ---- conversational flow UI helpers ----
+function renderCreateFlowMessage(payload) {
+  const msg = payload.message || "";
+
+  if (payload.status !== "need_more_info") {
+    return [{ from: "bot", text: msg }];
+  }
+
+  const awaiting = payload.awaiting;
+
+  // If backend provides structured buttons (Option B)
+  if (Array.isArray(payload.buttons) && payload.buttons.length > 0) {
+    return [
+      { from: "bot", text: msg || "Choose an option:" },
+      {
+        from: "bot",
+        type: "button_group",
+        buttons: payload.buttons
+      }
+    ];
+  }
+
+  if (awaiting === "date") {
+    return [
+      { from: "bot", text: "🗓️ When should I schedule it?" },
+      {
+        from: "bot",
+        type: "button_group",
+        buttons: [
+          { label: "Today", value: "today" },
+          { label: "Tomorrow", value: "tomorrow" },
+          { label: "Day After", value: "day after" }
+        ]
+      },
+      { from: "bot", text: "Or type a date like **dd/mm/yyyy**" }
+    ];
+  }
+
+  if (awaiting === "time") {
+    return [
+      { from: "bot", text: "⏰ What time should I schedule it?" },
+      {
+        from: "bot",
+        type: "button_group",
+        buttons: [
+          { label: "9:00 AM", value: "9:00 am" },
+          { label: "3:00 PM", value: "3:00 pm" },
+          { label: "5:30 PM", value: "5:30 pm" }
+        ]
+      },
+      { from: "bot", text: "Or type a time like **11am**, **12 pm**, or **11:23 am**" }
+    ];
+  }
+
+  if (awaiting === "duration") {
+    return [
+      { from: "bot", text: "⏱️ For how long?" },
+      {
+        from: "bot",
+        type: "button_group",
+        buttons: [
+          { label: "15 mins", value: "15 mins" },
+          { label: "30 mins", value: "30 mins" },
+          { label: "1 hour", value: "1 hour" }
+        ]
+      },
+      { from: "bot", text: "Or type a duration like **20 mins**, **45 minutes**, or **2 hours**" }
+    ];
+  }
+
+  return [
+    { from: "bot", text: msg }
+  ];
+}
+
+function AppointmentListPanel({ title, items, emptyText, keySuffix = '', onRename, onReschedule, onCancel, weekdayName }) {
+  return (
+    <div style={styles.panel}>
+      <div style={styles.panelTitle}>{title}</div>
+      {items.length === 0 ? (
+        <div style={styles.empty}>{emptyText}</div>
+      ) : (
+        <ul style={styles.list}>
+          {items.map((a) => (
+            <li key={a.id ?? `${a.date}-${a.start_time}-${a.end_time}${keySuffix}`} style={styles.listItem}>
+              <div style={styles.row}>
+                <span style={styles.date}>
+                  <span style={styles.weekday}>{weekdayName(a.date)}</span>
+                  {a.date}
+                </span>
+                <span style={styles.time}>
+                  {(a.start_time || a.start) ?? '??'} – {(a.end_time || a.end) ?? '??'}
+                </span>
+              </div>
+              <div style={styles.desc}>{a.title || a.description || '—'}</div>
+              {(a.location || a.modality || a.label) && (
+                <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
+                  {a.location ? `📍 ${a.location} ` : ''}
+                  {a.modality ? `• ${a.modality} ` : ''}
+                  {a.label ? `• ${a.label}` : ''}
+                </div>
+              )}
+              <div style={styles.actionRow}>
+                <button onClick={() => onRename(a)} style={styles.smallBtn}>Rename</button>
+                <button onClick={() => onReschedule(a)} style={styles.smallBtn}>Reschedule</button>
+                <button onClick={() => onCancel(a)} style={{ ...styles.smallBtn, background: '#ef4444' }}>
+                  Cancel
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [query, setQuery] = useState('');
@@ -515,6 +542,23 @@ function App() {
       }
     }
   };
+
+  const handleButtonClick = async (value) => {
+    setMessages((m) => [...m, { from: 'user', text: value }]);
+
+    setLoading(true);
+    try {
+      const { data } = await api.post(
+        '/query',
+        { query: value },
+        { headers: { "Content-Type": "application/json" } }
+      );
+      applyPayload(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ---- reminders polling (in-app notifications) ----------------------------
   useEffect(() => {
     const poll = async () => {
@@ -1177,82 +1221,27 @@ function App() {
               )}
             </div>
             {/* Appointments */}
-            <div style={styles.panel}>
-              <div style={styles.panelTitle}>Appointments</div>
-              {appointments.length === 0 ? (
-                <div style={styles.empty}>No appointments to display.</div>
-              ) : (
-                <ul style={styles.list}>
-                  {appointments.map((a) => (
-                    <li key={a.id ?? `${a.date}-${a.start_time}-${a.end_time}`} style={styles.listItem}>
-                      <div style={styles.row}>
-                        <span style={styles.date}>
-                          <span style={styles.weekday}>{weekdayName(a.date)}</span>
-                          {a.date}
-                        </span>
-                        <span style={styles.time}>
-                          {(a.start_time || a.start) ?? '??'} – {(a.end_time || a.end) ?? '??'}
-                        </span>
-                      </div>
-                      <div style={styles.desc}>{a.title || a.description || '—'}</div>
-                      {(a.location || a.modality || a.label) && (
-                        <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                          {a.location ? `📍 ${a.location} ` : ''}
-                          {a.modality ? `• ${a.modality} ` : ''}
-                          {a.label ? `• ${a.label}` : ''}
-                        </div>
-                      )}
-                      <div style={styles.actionRow}>
-                        <button onClick={() => renameAppointment(a)} style={styles.smallBtn}>Rename</button>
-                        <button onClick={() => rescheduleAppointment(a)} style={styles.smallBtn}>Reschedule</button>
-                        <button onClick={() => cancelAppointment(a)} style={{ ...styles.smallBtn, background: '#ef4444' }}>
-                          Cancel
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <AppointmentListPanel
+              title="Appointments"
+              items={appointments}
+              emptyText="No appointments to display."
+              weekdayName={weekdayName}
+              onRename={renameAppointment}
+              onReschedule={rescheduleAppointment}
+              onCancel={cancelAppointment}
+            />
 
             {/* Created */}
-            <div style={styles.panel}>
-              <div style={styles.panelTitle}>Created</div>
-              {createdAppts.length === 0 ? (
-                <div style={styles.empty}>No newly created appointments.</div>
-              ) : (
-                <ul style={styles.list}>
-                  {createdAppts.map((a) => (
-                    <li key={a.id ?? `${a.date}-${a.start_time}-${a.end_time}-created`} style={styles.listItem}>
-                      <div style={styles.row}>
-                        <span style={styles.date}>
-                          <span style={styles.weekday}>{weekdayName(a.date)}</span>
-                          {a.date}
-                        </span>
-                        <span style={styles.time}>
-                          {(a.start_time || a.start) ?? '??'} – {(a.end_time || a.end) ?? '??'}
-                        </span>
-                      </div>
-                      <div style={styles.desc}>{a.title || a.description || '—'}</div>
-                      {(a.location || a.modality || a.label) && (
-                        <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                          {a.location ? `📍 ${a.location} ` : ''}
-                          {a.modality ? `• ${a.modality} ` : ''}
-                          {a.label ? `• ${a.label}` : ''}
-                        </div>
-                      )}
-                      <div style={styles.actionRow}>
-                        <button onClick={() => renameAppointment(a)} style={styles.smallBtn}>Rename</button>
-                        <button onClick={() => rescheduleAppointment(a)} style={styles.smallBtn}>Reschedule</button>
-                        <button onClick={() => cancelAppointment(a)} style={{ ...styles.smallBtn, background: '#ef4444' }}>
-                          Cancel
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <AppointmentListPanel
+              title="Created"
+              items={createdAppts}
+              emptyText="No newly created appointments."
+              keySuffix="-created"
+              weekdayName={weekdayName}
+              onRename={renameAppointment}
+              onReschedule={rescheduleAppointment}
+              onCancel={cancelAppointment}
+            />
 
             {/* Free slots */}
             <div style={styles.panel}>
