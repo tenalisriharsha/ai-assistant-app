@@ -8,6 +8,54 @@ Format per entry: **what changed** → **why** → **files touched**.
 
 ---
 
+## 2026-08-19 20:40 CDT — Fix NL cancel/delete silently deleting the wrong appointment
+
+Context: ran a systematic sweep of free-form natural-language queries
+across every advertised capability (create, recurring create, reschedule,
+rename, delete, retrieve, free-time, reminders) to actually verify the
+app's core NL functionality, rather than just the specific bugs fixed
+earlier today. Found two real, previously-unknown bugs.
+
+- **`handle_nl_delete_cancel` could silently delete the wrong
+  appointment.** It only recognizes a title via "titled X"/"called
+  X"/"named X" patterns; a bare "cancel <name>" doesn't match any of
+  those, so title extraction fails — and the no-date fallback then
+  searched the next 7 days with **no title filter at all**, deleting
+  whichever appointment happened to be alone in that window, regardless
+  of whether it had anything to do with what was asked. Concretely:
+  `"cancel Dentist Checkup"` (a title that never existed) deleted an
+  unrelated real appointment 5 days out and reported success. Fixed by
+  only widening the no-date search to a week when a title was actually
+  extracted (filtered by it there too); with no title at all, the search
+  now stays capped at today rather than blindly guessing across a wider
+  window.
+  Files: `intents/nl/handlers.py`
+
+- **Recurring-create defaulted every appointment's title to "New
+  event"** for the direct phrasing "schedule `<title>` every ..." —
+  including the project's own advertised example query, *"Schedule
+  standup every Monday at 10 AM for 3 weeks."* Title extraction only
+  recognized "titled/called/named X"; added a fallback that reads the
+  direct object between the create verb and "every".
+  Files: `intents/nl/handlers.py`
+
+- Added `tests/test_nl_delete_cancel.py` covering the exact bug
+  scenario, the legitimate today-only no-title convenience case, and
+  the legitimate title-driven week-wide search. Verified the first test
+  actually fails against the pre-fix code before confirming the fix.
+
+Also confirmed (not bugs, existing design limits worth knowing about):
+without a Groq API key configured, several common retrieval phrasings
+("what's on my calendar this week", "what are my reminders") and
+creates that don't include the literal word "appointment"/"meeting"
+(e.g. "schedule a call with the dentist tomorrow") fall through to the
+naive local fallback parser, which has much narrower coverage than the
+LLM tier — this matches the documented "minimal local fallback" design,
+not a regression, but worth knowing if free-form phrasing seems to be
+silently ignored.
+
+---
+
 ## 2026-08-19 — Full audit fixes: critical bugs, security hardening, repo cleanup, test coverage
 
 Context: a full end-to-end review of the backend (Flask/SQLAlchemy) and
