@@ -112,18 +112,25 @@ def handle_nl_delete_cancel(db, query, q_lower, data):
                 min_ratio=0.60,
             ) or []
         else:
-            # No date given: try today first; if no unique match, widen to next 7 days
+            # No date given: try today first; if no unique match and a title
+            # was actually extracted, widen to the next 7 days (still
+            # filtered by that title). Without a title there is nothing to
+            # safely narrow a week-wide search by, so we deliberately do NOT
+            # widen in that case — silently deleting whichever appointment
+            # happens to be alone somewhere in the next week, with no
+            # relation to what was actually asked for, is not a safe guess.
             today_local = _date.today()
             todays = get_appointments_by_date(db, today_local)
             if title:
                 todays = [a for a in todays if _fuzzy_match(a.description or '', title, case_insensitive=True, min_ratio=0.60)]
             if len(todays) == 1:
                 matches = todays
-            else:
+            elif title:
                 win = get_appointments_for_week(db, today_local, today_local + timedelta(days=7))
-                if title:
-                    win = [a for a in win if _fuzzy_match(a.description or '', title, case_insensitive=True, min_ratio=0.60)]
+                win = [a for a in win if _fuzzy_match(a.description or '', title, case_insensitive=True, min_ratio=0.60)]
                 matches = win
+            else:
+                matches = todays
     except Exception:
         matches = []
 
@@ -699,8 +706,24 @@ def handle_nl_recurring(db, query, q_lower, data):
     try:
         preview_only = 'preview' in q_lower
 
-        # title
-        title = _extract_title_from_text(query) or 'New event'
+        # title: "titled X"/"called X"/"named X" first (handles e.g. "every
+        # Thursday 7pm until Oct 15 titled Dance"); if that fails, fall back
+        # to the direct-object phrasing "schedule/book/create/make <title>
+        # every ..." (e.g. "schedule standup every Monday at 10am") — this
+        # is the app's own advertised example query, and without this
+        # fallback it silently created appointments titled "New event".
+        title = _extract_title_from_text(query)
+        if not title:
+            m_direct = re.search(
+                r'\b(?:schedule|make|create|book)\b\s+(?:an?\s+)?(.+?)\s+every\b',
+                query,
+                flags=re.IGNORECASE,
+            )
+            if m_direct:
+                candidate = m_direct.group(1).strip()
+                if candidate.lower() not in ('appointment', 'meeting', 'event', 'an appointment', 'a meeting'):
+                    title = candidate
+        title = title or 'New event'
 
         # time + duration
         m_time = re.search(r'\bat\s*([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)\b', q_lower)
