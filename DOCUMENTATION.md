@@ -880,6 +880,36 @@ codesign --deep --force --sign - "/Applications/Scheduler AI.app"
 
 For distribution, you need an Apple Developer ID certificate.
 
+### `npm run electron:dev` fails with "Electron ENOENT" or a "malware" notification
+
+Two separate issues, both fixed automatically as of 2026-08-19:
+
+1. **ENOENT** (`spawn .../Electron.app/Contents/MacOS/Electron ENOENT`) — the
+   `electron` npm package's postinstall binary download was skipped or
+   interrupted, so only `LICENSE`/`version` files exist in
+   `node_modules/electron/dist/`, no actual `Electron.app`. Fix:
+   ```bash
+   node node_modules/electron/install.js
+   ```
+2. **A "malware" notification, and the app disappears again right after**
+   — this is real, not a false alarm you can just dismiss: on newer macOS,
+   the downloaded `Electron.app`'s ad-hoc/dev signature fails Apple's
+   Certificate Transparency check (visible in the unified log as `AMFI: has
+   no CMS blob?` / `Unrecoverable CT signature issue`), and Gatekeeper's
+   enforcement daemon (`syspolicyd`) automatically deletes it —
+   `xattr -rd com.apple.quarantine` does **not** fix this, since it's a
+   deeper kernel-level signature check, not the quarantine flag. Fix: give
+   it a valid local signature (same pattern as the packaged-app fix above):
+   ```bash
+   codesign --deep --force --sign - node_modules/electron/dist/Electron.app
+   ```
+
+Both are now handled automatically — `npm run electron:dev` runs
+`scripts/fix-electron-dev-signing.js` first (via npm's `preelectron:dev`
+hook), which re-signs the binary every time, so this shouldn't come up
+again. It only re-triggers if `node_modules` gets reinstalled fresh and
+the binary download itself fails, in which case run step 1 above first.
+
 ### Calendar sync asks for permission repeatedly
 
 Grant permission in:

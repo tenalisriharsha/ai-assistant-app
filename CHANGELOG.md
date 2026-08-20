@@ -8,6 +8,57 @@ Format per entry: **what changed** → **why** → **files touched**.
 
 ---
 
+## 2026-08-19 23:05 CDT — Fix Electron dev mode failing to launch on newer macOS
+
+Context: tried running `npm run electron:dev` for the first time this
+session (the Electron-only surface — export/import backup, native
+notifications, print-to-PDF, Calendar.app sync, Spotlight, Siri Shortcuts,
+the Today Widget — had never been exercised at all). It failed outright,
+in two stages.
+
+- **Stage 1 — `Electron ENOENT`**: `node_modules/electron/dist/` only had
+  `LICENSE`/`version` files, no actual `Electron.app`. The `electron` npm
+  package's postinstall binary download had never completed (likely a
+  network hiccup during the original `npm install`). Fixed by running
+  `node node_modules/electron/install.js` directly.
+
+- **Stage 2 — a macOS notification reporting the app as malware, and the
+  binary disappearing again right after**: this turned out to be real, not
+  a dismissible false alarm. The unified log showed the actual cause —
+  `AMFI: '.../Electron' has no CMS blob?` / `Unrecoverable CT signature
+  issue, bailing out.`, followed by `syspolicyd: Attempting to move
+  malware to trash... Successfully moved malware to trash`. The freshly
+  downloaded Electron binary's ad-hoc/dev signature fails newer macOS's
+  Certificate Transparency signature check, and Gatekeeper's enforcement
+  daemon deletes it automatically the moment anything tries to launch it.
+  `xattr -rd com.apple.quarantine` does not touch this — it's a deeper
+  AMFI/kernel-level signature check, not the quarantine flag. Fixed by
+  giving the binary a valid local signature — the same
+  `codesign --deep --force --sign -` pattern the project already used for
+  the packaged app (`scripts/sign-macos.js`), just applied to the raw dev
+  binary in `node_modules` too.
+
+- Made the fix **automatic** rather than a manual step someone has to
+  remember: added `scripts/fix-electron-dev-signing.js`, wired in via
+  npm's `preelectron:dev` hook, so every `npm run electron:dev` re-signs
+  the binary first (idempotent, ~instant, no-ops safely if Electron isn't
+  downloaded yet or on non-macOS).
+
+- Documented both fixes in `DOCUMENTATION.md`'s troubleshooting section.
+
+**Verified working end-to-end** once fixed: the Electron shell launches, correctly
+auto-starts the Python backend (`[Main] Backend is ready`), and the full
+React UI renders identically to the browser version. Confirmed live by
+creating a real appointment ("sweep" at 23:30 today) and querying it back
+via two different NL phrasings — both round-tripped correctly with no
+errors. Cleaned up the test appointment afterward; real DB confirmed back
+to baseline (138 appointments / 5 reminders).
+
+Files: `frontend/scripts/fix-electron-dev-signing.js`,
+`frontend/package.json`, `DOCUMENTATION.md`
+
+---
+
 ## 2026-08-19 21:42 CDT — Full hands-on UI test pass: 3 real bugs found and fixed
 
 Context: drove the actual React UI end-to-end in a browser (not just API

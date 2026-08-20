@@ -12,6 +12,7 @@
     "build:web": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
+    "preelectron:dev": "node scripts/fix-electron-dev-signing.js",
     "electron:dev": "concurrently -k \"PORT=3001 BROWSER=none npm start\" \"wait-on tcp:3001 && electron .\"",
     "prebuild:backend": "node scripts/prebuild-backend.js",
     "prebuild:native": "node scripts/build-native.js",
