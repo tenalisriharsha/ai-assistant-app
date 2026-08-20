@@ -8,6 +8,47 @@ Format per entry: **what changed** → **why** → **files touched**.
 
 ---
 
+## 2026-08-19 20:55 CDT — Broaden NL fast-path coverage for retrieval and non-standard create phrasing
+
+Follow-up to the previous entry's sweep. Without a Groq API key (the
+default for local dev), these phrasings had zero fast-path coverage and
+fell through to the much weaker naive local parser, which either errored
+outright or silently misread the request:
+
+- **"what's on my calendar this week" / "what do I have tomorrow" / "my
+  schedule this month" / "show me today's appointments"** — no existing
+  handler matched retrieval phrasing without a "titled/called/named X"
+  title filter (the `handle_nl_title_*` handlers all require one). Added
+  `handle_nl_show_timeframe`.
+- **"what are my reminders"** — nothing listed reminders via free text at
+  all (only "remind me..." to create one). Added `handle_nl_list_reminders`.
+- **"schedule a call with the dentist tomorrow at 3pm for 30 minutes"** —
+  `handle_nl_create_fallback` required the literal word "appointment" or
+  "meeting" in the sentence; without it, the naive parser took over and
+  treated the whole sentence as a date-only lookup, silently creating
+  nothing. Broadened the trigger to also accept a create verb plus an
+  actual time/date signal, and added a direct-object title fallback so it
+  extracts "call with the dentist" instead of defaulting to "New
+  appointment".
+
+One self-inflicted bug caught before commit: the first version of
+`handle_nl_show_timeframe` excluded any query containing the word
+"schedule" (to avoid misreading create requests as retrieval) — which
+also rejected "my schedule this month" itself, since "schedule" appears
+there as a noun. Fixed by only applying that exclusion when the query
+doesn't already contain the unambiguous "my calendar/schedule/
+appointments/agenda" possessive phrase.
+
+Verified with a full sweep of both the newly-covered phrases and the
+project's own README example queries (rename, free-time, structured
+create, recurring create) to confirm zero regressions — plus a live
+browser check of the create-without-"appointment" case end-to-end.
+Locked in with `tests/test_nl_coverage_broadening.py` (7 tests, all
+passing).
+Files: `intents/nl/handlers.py`, `intents/nl/__init__.py`
+
+---
+
 ## 2026-08-19 20:40 CDT — Fix NL cancel/delete silently deleting the wrong appointment
 
 Context: ran a systematic sweep of free-form natural-language queries
