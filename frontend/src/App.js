@@ -345,11 +345,7 @@ function App() {
 
   // helper already added earlier; include if missing
   async function markReminderDelivered(id) {
-    await api.post('/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reminder_mark_delivered', id }),
-    });
+    await api.post('/query', { action: 'reminder_mark_delivered', id });
   }
 
   // Register once on app start (avoid duplicate listeners in dev/hot-reload)
@@ -394,12 +390,26 @@ function App() {
   const applyPayload = (data) => {
     if (!data || typeof data !== 'object') return;
 
-    // Preview mode payload: the real data is nested under `preview`
-    if (data.preview && typeof data.preview === 'object') {
+    // Preview mode payload. Every real backend response sets `preview` to a
+    // flat array of proposed slots (see intents/nl/handlers.py, app.py) —
+    // NOT a nested payload object. `typeof [] === 'object'` is true in JS,
+    // so the old check here always matched and always recursed into the
+    // array itself, which has none of the fields applyPayload looks for —
+    // silently dropping every preview response ("No proposals yet." even
+    // when the backend returned real proposed slots).
+    if (data.preview) {
       setIsPreview(true);
       setMessages((m) => [...m, { from: 'bot', text: 'Preview only — no changes applied.' }]);
-      applyPayload(data.preview);
-      return;
+      if (Array.isArray(data.preview)) {
+        setProposals(data.preview);
+        // Don't return — some preview responses also carry skipped_conflicts
+        // / message alongside `preview`, handled further down below.
+      } else if (typeof data.preview === 'object') {
+        // Defensive fallback in case some future response nests a full
+        // payload under `preview` instead of a flat array.
+        applyPayload(data.preview);
+        return;
+      }
     }
 
     // Conversational CREATE-APPOINTMENT flow
@@ -654,21 +664,17 @@ function App() {
     setLoading(true);
     setErrorText('');
 
-    const lower = trimmed.toLowerCase();
-    const isCreateLike = /(schedule|create|add|book|hold|block|reserve|set up|set-up|set\s+up)/i.test(lower);
-    const isModifyLike = /(move|reschedule|change|edit|update|shift|rename|retitle)/i.test(lower);
-    const isCancelLike = /(cancel|delete|remove|clear)/i.test(lower);
-    const wantsFree = /(free|available|availability|open|slot|free time)/i.test(lower);
-    const mentionsBetween = /\bbetween\b/i.test(lower);
-
-    let payload = { query: trimmed };
-    if (!isCreateLike && !isModifyLike && !isCancelLike && !wantsFree && !mentionsBetween) {
-      if (/\bthis week\b/i.test(lower)) {
-        payload = { action: 'this_week' };
-      } else if (/\btoday\b/i.test(lower)) {
-        payload = { action: 'today' };
-      }
-    }
+    // Always send the raw text as a query — the backend's fast-path
+    // handlers and NL fallback already parse "today"/"this week" bare
+    // queries, counts, reminders, etc. correctly. This used to
+    // second-guess that: any query mentioning "today"/"this week" that
+    // didn't also contain one of a handful of hardcoded keywords (schedule/
+    // cancel/free/between/...) had its entire text silently discarded and
+    // replaced with a bare {action:'today'} — so "remind me at 5pm today
+    // to call Alex" or "how many meetings today" would silently turn into
+    // a plain listing of today's appointments instead of doing what was
+    // actually asked.
+    const payload = { query: trimmed };
 
     try {
       const { data } = await api.post('/query', payload, {

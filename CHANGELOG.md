@@ -8,6 +8,82 @@ Format per entry: **what changed** → **why** → **files touched**.
 
 ---
 
+## 2026-08-19 21:42 CDT — Full hands-on UI test pass: 3 real bugs found and fixed
+
+Context: drove the actual React UI end-to-end in a browser (not just API
+calls) — create, rename, reschedule, cancel, recurring preview/book, free
+time, conflict detection, reminders (create/snooze/pause/delete), and
+due-reminder toasts. Found and fixed three real, previously-unknown bugs;
+everything else (documented below) worked correctly.
+
+- **Any free-text query mentioning "today"/"this week" that didn't also
+  contain one of five hardcoded keywords had its entire text silently
+  discarded.** `handleQuery` classified queries by regex
+  (create/modify/cancel/free/between-like); anything matching none of
+  those, but containing "today" or "this week", got its whole payload
+  replaced with a bare `{action:'today'}`/`{action:'this_week'}` —
+  throwing away what the user actually typed. Concretely: *"remind me at
+  5pm today to call Alex"* silently became "show me today's appointments"
+  and never created the reminder; *"how many meetings today"* would have
+  shown a full listing instead of a count. Since the backend already
+  parses bare "today"/"this week" queries correctly through its own
+  fast-path handlers (including the ones added earlier today), this
+  frontend-side shortcut was both unsafe and redundant — removed it
+  entirely; every query now goes to the backend as typed.
+  Files: `frontend/src/App.js`
+
+- **Recurring-preview responses never rendered.** `applyPayload` checked
+  `typeof data.preview === 'object'` to detect a "nested payload" preview
+  shape and recurse into it — but `typeof [] === 'object'` is `true` in
+  JS, and *every* real backend response sets `preview` to a flat array of
+  proposed slots, never a nested object. So it always recursed into the
+  array itself (which has none of the fields `applyPayload` looks for) and
+  silently dropped the response — "No proposals yet." in the UI even when
+  the backend returned real preview slots, discovered testing *"preview
+  standup every Monday at 10am for 3 weeks."* Fixed to treat an array
+  `preview` as the proposals list directly.
+  Files: `frontend/src/App.js`
+
+- **Dismissing a due-reminder toast crashed with an uncaught runtime
+  error, every time.** `markReminderDelivered` called
+  `api.post('/query', { method, headers, body: JSON.stringify(...) })` —
+  `fetch()`-style options passed as axios's *data* argument, so axios sent
+  that literal object as the JSON body instead of
+  `{action: 'reminder_mark_delivered', id}`. The backend always rejected
+  it with a 400, uncaught, crashing the app. This had likely never worked
+  since it was written.
+  Files: `frontend/src/App.js`
+
+- **Two smaller, related NL gaps found and fixed in the same pass**:
+  recurring-create title extraction didn't recognize "preview" as a verb
+  (`"preview standup every Monday..."` still defaulted to "New event"
+  even after the earlier title-extraction fix, since only
+  schedule/make/create/book were in the direct-object regex — added
+  "preview"). A stray temporary `/__debug_sessions` route (added, then
+  removed) was used to rule out session-state as the cause of the "today"
+  bug before finding the real one.
+  Files: `intents/nl/handlers.py`
+
+- **Verified working correctly, no changes needed**: create (NL + guided
+  button flow), rename/reschedule/cancel via UI buttons (including the
+  native `window.prompt`/`window.confirm` dialogs), recurring
+  preview→book round trip, free-time query → book a proposed slot,
+  conflict detection (proposes alternatives instead of double-booking),
+  reminder Snooze/Pause/Delete, Cmd+N keyboard shortcut. Export/Import
+  backup and Print-to-PDF are Electron-only by design and couldn't be
+  exercised in browser-only testing.
+
+Added `frontend/src/App.test.js` regression tests for all three bugs (mocked
+API, real user interaction via Testing Library), each verified to fail
+against the pre-fix code before confirming the fix. Full backend suite
+(20 tests) and frontend suite (5 tests) both pass; real `appointments.db`
+confirmed unchanged (138 appointments / 5 reminders) after all testing —
+isolated via direct cleanup of every appointment/reminder created during
+the session.
+Files: `frontend/src/App.test.js`
+
+---
+
 ## 2026-08-19 20:55 CDT — Broaden NL fast-path coverage for retrieval and non-standard create phrasing
 
 Follow-up to the previous entry's sweep. Without a Groq API key (the

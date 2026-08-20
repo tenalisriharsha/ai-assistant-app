@@ -803,14 +803,14 @@ def handle_nl_recurring(db, query, q_lower, data):
 
         # title: "titled X"/"called X"/"named X" first (handles e.g. "every
         # Thursday 7pm until Oct 15 titled Dance"); if that fails, fall back
-        # to the direct-object phrasing "schedule/book/create/make <title>
-        # every ..." (e.g. "schedule standup every Monday at 10am") — this
-        # is the app's own advertised example query, and without this
-        # fallback it silently created appointments titled "New event".
+        # to the direct-object phrasing "schedule/book/create/make/preview
+        # <title> every ..." (e.g. "schedule standup every Monday at 10am")
+        # — this is the app's own advertised example query, and without
+        # this fallback it silently created appointments titled "New event".
         title = _extract_title_from_text(query)
         if not title:
             m_direct = re.search(
-                r'\b(?:schedule|make|create|book)\b\s+(?:an?\s+)?(.+?)\s+every\b',
+                r'\b(?:schedule|make|create|book|preview)\b\s+(?:an?\s+)?(.+?)\s+every\b',
                 query,
                 flags=re.IGNORECASE,
             )
