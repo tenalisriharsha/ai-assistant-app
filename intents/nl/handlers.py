@@ -31,7 +31,7 @@ from crud import (
     create_appointment, find_conflicts_for_slot,
     find_appointments, update_appointment_time, update_appointment_title,
     delete_appointment_by_id,
-    create_reminder, create_reminder_for_appointment,
+    create_reminder, create_reminder_for_appointment, list_reminders,
 )
 
 # Optional recurrence helpers
@@ -408,6 +408,71 @@ def handle_nl_title_any(db, query, q_lower, data):
 
 
 # ---------------------------------------------------------------------------
+# 5b) Generic "what's on my calendar this week?" — no title filter
+# ---------------------------------------------------------------------------
+def handle_nl_show_timeframe(db, query, q_lower, data):
+    """
+    Plain retrieval phrasing with no title to filter by, e.g. "what's on my
+    calendar this week", "what do I have tomorrow", "show me today's
+    appointments", "my schedule this month". The handle_nl_title_* handlers
+    above only match when a "titled/called/named X" phrase is present; this
+    is the untitled fallback for the same timeframes.
+    """
+    has_my_calendar_phrase = bool(re.search(r'\bmy\s+(?:calendar|schedule|appointments|agenda)\b', q_lower))
+    if not has_my_calendar_phrase:
+        # "schedule"/"book" etc. as a bare word usually means a create
+        # request ("schedule a call...") rather than retrieval — but that
+        # ambiguity only exists without the "my calendar/schedule/..."
+        # possessive phrase, which unambiguously means "show me", even
+        # though it contains the word "schedule" as a noun.
+        if re.search(r'\b(schedule|book|create|make|cancel|delete|remove|rename|reschedule)\b', q_lower):
+            return None
+        if not re.search(r'\b(what|show|list)\b', q_lower):
+            return None
+
+    today = _date.today()
+    if 'this week' in q_lower:
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+        appts = get_appointments_for_week(db, start, end)
+    elif 'next month' in q_lower:
+        start = (today.replace(year=today.year + 1, month=1, day=1)
+                 if today.month == 12 else today.replace(month=today.month + 1, day=1))
+        next_month = (start.replace(year=start.year + 1, month=1, day=1)
+                      if start.month == 12 else start.replace(month=start.month + 1, day=1))
+        end = next_month - timedelta(days=1)
+        appts = get_appointments_for_week(db, start, end)
+    elif 'this month' in q_lower:
+        start = today.replace(day=1)
+        next_month = (start.replace(year=start.year + 1, month=1, day=1)
+                      if start.month == 12 else start.replace(month=start.month + 1, day=1))
+        end = next_month - timedelta(days=1)
+        appts = get_appointments_for_week(db, start, end)
+    elif 'tomorrow' in q_lower:
+        appts = get_appointments_by_date(db, today + timedelta(days=1))
+    elif 'today' in q_lower:
+        appts = get_appointments_by_date(db, today)
+    else:
+        return None
+
+    return jsonify({'appointments': [_serialize_appt(a) for a in appts]})
+
+
+# ---------------------------------------------------------------------------
+# 5c) "What are my reminders?" — list, not create
+# ---------------------------------------------------------------------------
+def handle_nl_list_reminders(db, query, q_lower, data):
+    if any(k in q_lower for k in ['remind me', 'notify me', 'alert me', 'ping me', 'nudge me']):
+        return None  # let handle_nl_reminders (create) take it
+    if not re.search(r'\breminders?\b', q_lower):
+        return None
+    if not re.search(r'\b(what|show|list|my)\b', q_lower):
+        return None
+    reminders = list_reminders(db, active=None)
+    return jsonify({'reminders': [_serialize_reminder(r, db) for r in reminders]})
+
+
+# ---------------------------------------------------------------------------
 # 6) "How many … in the next 7 days / next week?"
 # ---------------------------------------------------------------------------
 def handle_nl_count_next_n_days(db, query, q_lower, data):
@@ -618,7 +683,22 @@ def handle_nl_delete_by_title(db, query, q_lower, data):
 # ---------------------------------------------------------------------------
 def handle_nl_create_fallback(db, query, q_lower, data):
     recurring_like = ('every' in q_lower) or bool(_parse_weekday_list(query))
-    if not (re.search(r'\b(schedule|make|create|book)\b.*\b(appointment|meeting)\b', q_lower) and not recurring_like):
+    has_verb = bool(re.search(r'\b(schedule|make|create|book)\b', q_lower))
+    has_appt_word = bool(re.search(r'\b(appointment|meeting)\b', q_lower))
+    # Broaden beyond requiring the literal word "appointment"/"meeting":
+    # also accept a create-verb sentence that has an actual time or date
+    # signal, e.g. "schedule a call with the dentist tomorrow at 3pm".
+    # Without this, phrasing like that silently fell through to the much
+    # weaker naive local fallback parser instead of creating anything.
+    has_time_or_date = bool(
+        re.search(r'\b(?:at|@)\s*[0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?\b', q_lower)
+        or 'today' in q_lower or 'tomorrow' in q_lower
+        or re.search(r'\b20\d{2}-\d{2}-\d{2}\b', q_lower)
+    )
+    is_retrieval_like = bool(re.search(r'\b(what|show|list|how\s+many)\b', q_lower))
+    if not has_verb or recurring_like or is_retrieval_like:
+        return None
+    if not (has_appt_word or has_time_or_date):
         return None
 
     # 1) date
@@ -656,6 +736,21 @@ def handle_nl_create_fallback(db, query, q_lower, data):
         )
         if m_title2:
             title = m_title2.group(1).strip()
+
+    if not title:
+        # Direct-object fallback: "schedule/book/create/make <title> today
+        # at 3pm" -> capture whatever sits between the verb and the first
+        # date/time signal, e.g. "a call with the dentist".
+        m_direct = re.search(
+            r'\b(?:schedule|make|create|book)\b\s+(?:an?\s+)?(.+?)'
+            r'(?:\s+today\b|\s+tomorrow\b|\s+on\s+\S|\s+at\s*[0-9]|\s*@\s*[0-9]|\b20\d{2}-\d{2}-\d{2}\b|$)',
+            query,
+            flags=re.IGNORECASE
+        )
+        if m_direct:
+            candidate = m_direct.group(1).strip()
+            if candidate.lower() not in ('appointment', 'meeting', 'an appointment', 'a meeting', ''):
+                title = candidate
 
     if title:
         title = title.strip().strip("'\"\u201c\u201d\u2018\u2019").strip()

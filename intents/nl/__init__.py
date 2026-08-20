@@ -6,6 +6,7 @@ from flask import Response
 from .handlers import (
     handle_nl_delete_cancel,
     handle_nl_reminders,
+    handle_nl_list_reminders,
     handle_nl_free_availability,
     handle_nl_count_month,
     handle_nl_title_month,
@@ -14,6 +15,7 @@ from .handlers import (
     handle_nl_title_today,
     handle_nl_title_tomorrow,
     handle_nl_title_any,
+    handle_nl_show_timeframe,
     handle_nl_count_next_n_days,
     handle_nl_after_time,
     handle_nl_rename,
@@ -30,6 +32,7 @@ from .handlers import (
 HANDLERS = [
     handle_nl_delete_cancel,
     handle_nl_reminders,
+    handle_nl_list_reminders,
     handle_nl_free_availability,
     handle_nl_count_month,
     handle_nl_title_month,
@@ -38,6 +41,7 @@ HANDLERS = [
     handle_nl_title_today,
     handle_nl_title_tomorrow,
     handle_nl_title_any,
+    handle_nl_show_timeframe,
     handle_nl_count_next_n_days,
     handle_nl_after_time,
     handle_nl_rename,
