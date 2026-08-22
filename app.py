@@ -1,5 +1,5 @@
 # routes.py  — Scheduler API (refactored)
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, send_from_directory
 from flask_cors import CORS
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -61,7 +61,22 @@ except Exception:
 from schemas import Appointment as AppointmentSchema
 from pydantic import ValidationError
 
-app = Flask(__name__)
+import os
+import hmac
+import secrets
+
+# Set only in the hosted deployment (see Dockerfile), where this same Flask
+# app also serves the built React frontend, same-origin with the API.
+# Unset for local/desktop use — nothing here changes for those.
+# CRA's build nests JS/CSS under build/static/, so that's what static_folder
+# points at; build/index.html and friends (favicon, manifest, etc.) are
+# served separately below since they sit outside that /static/ prefix.
+FRONTEND_BUILD_DIR = os.getenv("FRONTEND_BUILD_DIR")
+app = Flask(
+    __name__,
+    static_folder=os.path.join(FRONTEND_BUILD_DIR, "static") if FRONTEND_BUILD_DIR else None,
+    static_url_path="/static" if FRONTEND_BUILD_DIR else None,
+)
 
 # This server listens on 127.0.0.1 and is reachable by ANY page the user has
 # open in their regular browser, not just this app's own frontend. Since
@@ -75,7 +90,69 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:3001",
     "null",                    # packaged Electron app loads via file://, sent as Origin: null
 ]
-CORS(app, origins=ALLOWED_ORIGINS)
+# In the hosted deployment, the frontend is served by this same Flask app
+# (same-origin, no CORS involved at all). This only matters if a frontend
+# is ever hosted separately from this backend.
+_extra_origins = [o.strip() for o in os.getenv("EXTRA_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS(app, origins=ALLOWED_ORIGINS + _extra_origins, supports_credentials=True)
+
+# ---------------------------------------------------------------------------
+# Optional password gate. Local/desktop use (no APP_PASSWORD set) is
+# untouched — every route behaves exactly as before. Setting APP_PASSWORD
+# (as done for the hosted deployment) requires a valid session before any
+# data-bearing route responds, since this server is otherwise reachable by
+# anyone who has the URL.
+# ---------------------------------------------------------------------------
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "1") == "1"
+
+APP_PASSWORD = os.getenv("APP_PASSWORD") or None
+
+
+def _auth_required() -> bool:
+    return APP_PASSWORD is not None
+
+
+def require_auth(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return f(*args, **kwargs)
+        if _auth_required() and not session.get("authenticated"):
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.post("/login")
+def login():
+    if not _auth_required():
+        return jsonify({"ok": True, "auth_required": False})
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+    if hmac.compare_digest(password, APP_PASSWORD):
+        session.clear()
+        session["authenticated"] = True
+        session.permanent = True
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Invalid password"}), 401
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.get("/session")
+def session_status():
+    return jsonify({
+        "auth_required": _auth_required(),
+        "authenticated": (not _auth_required()) or bool(session.get("authenticated")),
+    })
+
 
 # Global in-memory session states to support multi-step creation
 CREATE_APPT_SESSIONS: Dict[str, dict] = {}
@@ -102,9 +179,12 @@ def with_db(f):
 def health():
     return jsonify({'ok': True, 'service': 'scheduler', 'time': _dt.now().isoformat()})
 
-# Tiny root route for manual pings
+# Root route: serves the built frontend when deployed (FRONTEND_BUILD_DIR
+# set), otherwise a tiny JSON ping for manual checks (local/desktop use).
 @app.get('/')
 def root():
+    if FRONTEND_BUILD_DIR:
+        return send_from_directory(FRONTEND_BUILD_DIR, 'index.html')
     return jsonify({'status': 'running'})
 
 # JSON/error handler for bad JSON bodies
@@ -119,6 +199,7 @@ def handle_400(err):
 
 # ---------- export / import ----------
 @app.get('/export')
+@require_auth
 @with_db
 def export_all(db):
     """Export all appointments as JSON."""
@@ -132,6 +213,7 @@ def export_all(db):
 
 
 @app.post('/import')
+@require_auth
 @with_db
 def import_all(db):
     """Bulk import appointments from JSON."""
@@ -163,6 +245,7 @@ def import_all(db):
 
 
 @app.post('/import_ics')
+@require_auth
 @with_db
 def import_ics(db):
     """Import appointments from an uploaded .ics file."""
@@ -220,6 +303,7 @@ def import_ics(db):
 
 # ---------- route ----------
 @app.route('/query', methods=['POST', 'OPTIONS'])
+@require_auth
 @with_db
 def query_appointments(db):
     if request.method == 'OPTIONS':
@@ -1070,6 +1154,20 @@ def query_appointments(db):
         'raw_query': query
     }), 400
 
+
+
+# Serves everything else the built frontend needs that isn't under
+# /static/ (favicon.ico, manifest.json, robots.txt, logoNNN.png, ...), and
+# falls back to index.html for any other path so client-side navigation
+# (e.g. a hard refresh on a deep link) doesn't 404. Only registered when
+# deployed with FRONTEND_BUILD_DIR set; local/desktop use is unaffected.
+if FRONTEND_BUILD_DIR:
+    @app.get('/<path:path>')
+    def serve_frontend_asset(path):
+        full_path = os.path.join(FRONTEND_BUILD_DIR, path)
+        if os.path.isfile(full_path):
+            return send_from_directory(FRONTEND_BUILD_DIR, path)
+        return send_from_directory(FRONTEND_BUILD_DIR, 'index.html')
 
 
 if __name__ == '__main__':

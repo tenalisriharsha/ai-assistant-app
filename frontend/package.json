@@ -17,7 +17,7 @@
     "prebuild:backend": "node scripts/prebuild-backend.js",
     "prebuild:native": "node scripts/build-native.js",
     "prebuild:electron": "cp electron/main.js build/electron.js",
-    "electron:build": "npm run prebuild:backend && npm run prebuild:native && npm run build:web && npm run prebuild:electron && electron-builder --mac && npm run postbuild:sign",
+    "electron:build": "npm run prebuild:backend && npm run prebuild:native && REACT_APP_ELECTRON=true npm run build:web && npm run prebuild:electron && electron-builder --mac && npm run postbuild:sign",
     "postbuild:sign": "node scripts/sign-macos.js"
   },
   "devDependencies": {
