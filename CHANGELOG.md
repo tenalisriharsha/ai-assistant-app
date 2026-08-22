@@ -8,6 +8,60 @@ Format per entry: **what changed** → **why** → **files touched**.
 
 ---
 
+## 2026-08-22 00:31 CDT — Deployed live to PythonAnywhere (hosted, password-protected)
+
+The app is now reachable at **https://tenalisriharsha.pythonanywhere.com**,
+gated behind the password auth added in the previous entry. This is a
+separate, hosted instance — local/desktop/Electron use is unaffected.
+
+**Why PythonAnywhere, not Fly.io**: Fly.io was tried first, but real
+research (not just their marketing) turned up two disqualifying issues for
+the "no card, no billing risk" requirement — Fly eliminated its permanent
+free tier in 2024 (now just $5 trial credit capped at 2 VM-hours), and their
+own community forum has a real pattern of surprise-charge complaints (a
+$747 bill, a $75 charge for a throwaway app, billing continuing after
+cancellation), with persistent volumes specifically called out as a common
+cost trap — directly relevant since this app's SQLite database needs one.
+PythonAnywhere requires no card at all, ever, on the free tier.
+
+**Deployment shape** (see the previous "Add optional password auth and
+hosted-deployment support" entry for the code changes that made this
+possible): WSGI config points at `app.py`'s `app` object directly (no
+Docker — PythonAnywhere doesn't run arbitrary containers), `APP_PASSWORD`/
+`SECRET_KEY`/`FRONTEND_BUILD_DIR`/`SCHEDULER_DB_URL` are set directly in the
+WSGI file (free accounts have no dashboard env-var panel), and the SQLite
+database lives on PythonAnywhere's persistent home-directory filesystem —
+no volume-mount configuration needed there, unlike Fly.
+
+The frontend was built locally and transferred via
+`deploy/pythonanywhere_frontend_build.zip` + `git pull`, rather than
+running `npm install` on PythonAnywhere itself — their free tier's 512MB
+disk quota is too tight to safely run CRA's build there (`node_modules`
+alone can hit 300-500MB).
+
+**Known limitations of this specific deployment** (PythonAnywhere free
+tier, not app bugs):
+- The free web app must be manually "renewed" (one click, emailed reminder
+  a week ahead) at least once a month or it goes offline. No data loss —
+  just needs the click.
+- Outbound internet is allowlisted on the free tier, so the optional Groq
+  LLM fallback (`api.groq.com`) is unreachable there — a non-issue since
+  the app already works fully on the local naive parser without it.
+- 100 CPU-seconds/day quota — fine for personal single-user use.
+
+**Verified live** end-to-end through the actual deployed instance: login
+gate renders and unlocks correctly, creating an appointment via free-form
+NL ("schedule test today at 3pm for 15 mins") correctly wrote to the
+PythonAnywhere-hosted SQLite database, and retrieving it back
+("what appointments do I have today?") correctly read it — confirming the
+database path, static asset serving, and the whole request pipeline work
+on the real hosted instance, not just locally.
+
+Files: `deploy/pythonanywhere_frontend_build.zip` (new), WSGI config (lives
+on PythonAnywhere itself, not in this repo)
+
+---
+
 ## 2026-08-19 23:05 CDT — Fix Electron dev mode failing to launch on newer macOS
 
 Context: tried running `npm run electron:dev` for the first time this

@@ -755,6 +755,68 @@ The packaged app includes:
 - `native/` — compiled Swift binaries
 - `PlugIns/` — SiriIntents + SchedulerWidget extensions
 
+### 12.4 Hosted Deployment (PythonAnywhere)
+
+As of 2026-08-22, the app also runs as a hosted, password-protected
+instance at **https://tenalisriharsha.pythonanywhere.com** — separate from
+local/desktop/Electron use, which is completely unaffected by any of this.
+
+**Why PythonAnywhere**: it requires no credit card, ever, on the free
+tier. Fly.io was evaluated first but ruled out — it eliminated its
+permanent free tier in 2024 (now a $5 trial capped at 2 VM-hours), and its
+own community forum shows a real pattern of surprise billing complaints,
+with persistent volumes (which this app's SQLite database needs) called
+out as a specific cost trap.
+
+**What made this possible** (see `app.py`):
+- An optional password gate, active only when the `APP_PASSWORD` env var
+  is set — protects `/query`, `/export`, `/import`, `/import_ics` behind a
+  session cookie. Unset (the default for local/desktop use), the app
+  behaves exactly as it always has.
+- `FRONTEND_BUILD_DIR` env var: when set, Flask serves the built React
+  frontend itself (same-origin with the API, no CORS needed), instead of
+  the tiny JSON ping `/` normally returns.
+- `frontend/src/api.js` distinguishes three cases for its base URL:
+  relative in dev, a relative URL for a plain web deployment like this
+  one (same-origin), and the packaged Electron app's absolute
+  `http://127.0.0.1:5001` (gated behind a `REACT_APP_ELECTRON` build-time
+  flag, set only by `electron:build`).
+- `SCHEDULER_DB_URL` (already existed, originally added for test
+  isolation) points the SQLite file at PythonAnywhere's persistent home
+  directory — no volume-mount config needed there, unlike a
+  container-based host.
+
+**Deployment shape**: not Docker-based — PythonAnywhere's free tier
+doesn't run arbitrary containers. A WSGI config file (kept on
+PythonAnywhere itself, not in this repo) points at `app.py`'s `app`
+object directly and sets `APP_PASSWORD`/`SECRET_KEY`/`FRONTEND_BUILD_DIR`/
+`SCHEDULER_DB_URL` (free accounts have no dashboard env-var panel). The
+frontend is built locally (`npm run build:web`, no `REACT_APP_ELECTRON`
+flag) and transferred via `deploy/pythonanywhere_frontend_build.zip` +
+`git pull` on PythonAnywhere's end, rather than running `npm install`
+there — their free tier's 512MB disk quota is too tight to safely run
+CRA's build (`node_modules` alone can hit 300-500MB).
+
+**To update the live deployment** after a code change:
+1. Push your change to GitHub as normal.
+2. If you touched the frontend: `cd frontend && npm run build:web` (no
+   `REACT_APP_ELECTRON`), then re-zip `frontend/build/` into
+   `deploy/pythonanywhere_frontend_build.zip`, commit, and push.
+3. On PythonAnywhere (Bash console): `cd ~/ai-assistant-app && git pull`,
+   and if the frontend changed, `cd frontend_build && unzip -o
+   ../deploy/pythonanywhere_frontend_build.zip`.
+4. Reload the web app from the **Web** tab.
+
+**Known limitations of this deployment** (PythonAnywhere free tier, not
+app bugs):
+- The web app must be manually "renewed" (one click on the Web tab,
+  emailed reminder a week ahead) at least once a month, or it goes
+  offline — no data loss, just needs the click.
+- Outbound internet is allowlisted on the free tier, so the optional Groq
+  LLM fallback (`api.groq.com`) is unreachable there — a non-issue since
+  the app already works fully on the local naive parser without it.
+- 100 CPU-seconds/day quota — fine for personal single-user use.
+
 ---
 
 ## 13. File-by-File Reference
@@ -823,6 +885,13 @@ The packaged app includes:
 | `tests/test_reminders_due.py` | Reminder due/not-due classification + call sites use local time, not UTC |
 | `tests/test_bulk_create_conflicts.py` | In-batch, cross-batch, and pre-existing conflict detection |
 | `tests/test_create_flow_sessions.py` | Session isolation between clients + stale-session pruning |
+| `tests/test_auth.py` | Password-gate behavior: open when `APP_PASSWORD` unset, login/logout/session cycle when set |
+
+### Deployment
+
+| File | Purpose |
+|------|---------|
+| `deploy/pythonanywhere_frontend_build.zip` | Locally-built frontend, transferred to PythonAnywhere via `git pull` (see §12.4) |
 
 ### Frontend
 
@@ -831,6 +900,7 @@ The packaged app includes:
 | `frontend/src/App.js` | Main React application + `AppointmentListPanel` |
 | `frontend/src/App.test.js` | Jest/RTL tests |
 | `frontend/src/api.js` | Axios API client (adds per-tab `X-Session-Id`) |
+| `frontend/src/components/LoginGate.jsx` | Password screen shown when the backend reports `auth_required` |
 | `frontend/src/components/MicButton.jsx` | Microphone button |
 | `frontend/src/hooks/useKeyboardShortcuts.js` | Keyboard shortcuts |
 | `frontend/src/hooks/useSpeech.js` | Speech-to-text |
